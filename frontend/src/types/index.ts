@@ -12,7 +12,9 @@ export interface User {
 
 export interface Url {
   id: string;
+  _id?: string; // MongoDB ObjectId
   shortId: string;
+  shortCode?: string; // Alternative short identifier
   customAlias?: string;
   originalUrl: string;
   shortUrl: string;

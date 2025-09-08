@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Search, Copy, QrCode, BarChart3, Calendar, Lock } from 'lucide-react';
+import { Plus, Search, Copy, QrCode, BarChart3, Calendar, Lock, TrendingUp, Users, MousePointer, Eye } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -9,7 +9,7 @@ import { Url, CreateUrlData } from '../types';
 import { formatDate, truncateUrl, copyToClipboard } from '../lib/utils';
 import { CreateUrlModal } from '../components/CreateUrlModal';
 import { QRModal } from '../components/QRModal';
-import { AnalyticsModal } from '../components/AnalyticsModal';
+import AdvancedAnalyticsModal from '../components/AdvancedAnalyticsModal';
 
 export const DashboardPage: React.FC = () => {
   const [urls, setUrls] = useState<Url[]>([]);
@@ -28,6 +28,7 @@ export const DashboardPage: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
+  const [analyticsSummary, setAnalyticsSummary] = useState<any>(null);
   const [selectedUrl, setSelectedUrl] = useState<Url | null>(null);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
@@ -38,6 +39,16 @@ export const DashboardPage: React.FC = () => {
       console.log('Fetched URLs from server:', response.urls.length);
       setUrls(response.urls);
       setTotalPages(response.pagination.pages);
+      
+      // Fetch analytics summary
+      try {
+        const summaryResponse = await urlAPI.getUserAnalyticsSummary({ timeRange: '30d' });
+        if (summaryResponse.success) {
+          setAnalyticsSummary(summaryResponse.data);
+        }
+      } catch (summaryError) {
+        console.error('Failed to fetch analytics summary:', summaryError);
+      }
     } catch (error) {
       console.error('Failed to fetch URLs:', error);
     } finally {
@@ -115,8 +126,59 @@ export const DashboardPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          className="max-w-7xl mx-auto"
         >
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Dashboard</h1>
+            <p className="text-gray-600">Manage your shortened URLs</p>
+          </div>
+
+          {/* Analytics Summary Cards */}
+          {analyticsSummary && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-blue-600 text-sm font-medium">Total URLs</p>
+                    <p className="text-3xl font-bold text-blue-900">{analyticsSummary.totalUrls}</p>
+                  </div>
+                  <BarChart3 className="w-8 h-8 text-blue-600" />
+                </div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-green-600 text-sm font-medium">Total Clicks</p>
+                    <p className="text-3xl font-bold text-green-900">{analyticsSummary.totalClicks}</p>
+                  </div>
+                  <MousePointer className="w-8 h-8 text-green-600" />
+                </div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border border-purple-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-purple-600 text-sm font-medium">Unique Visitors</p>
+                    <p className="text-3xl font-bold text-purple-900">{analyticsSummary.totalUniqueVisitors}</p>
+                  </div>
+                  <Users className="w-8 h-8 text-purple-600" />
+                </div>
+              </div>
+              
+              <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg border border-orange-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-orange-600 text-sm font-medium">Click Rate</p>
+                    <p className="text-3xl font-bold text-orange-900">{analyticsSummary.summary?.clickRate || 0}</p>
+                    <p className="text-sm text-orange-600">/day</p>
+                  </div>
+                  <TrendingUp className="w-8 h-8 text-orange-600" />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900">Your Links</h1>
             <Button onClick={() => setShowCreateModal(true)}>
@@ -125,18 +187,28 @@ export const DashboardPage: React.FC = () => {
             </Button>
           </div>
 
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-6 border-b">
-              <div className="flex items-center space-x-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    placeholder="Search your links..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center space-x-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Input
+                      type="text"
+                      placeholder="Search URLs..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 w-64"
+                    />
+                  </div>
                 </div>
+                <Button
+                  onClick={() => setShowCreateModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Short URL
+                </Button>
               </div>
             </div>
 
@@ -301,7 +373,8 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {showAnalyticsModal && selectedUrl && (
-        <AnalyticsModal
+        <AdvancedAnalyticsModal
+          isOpen={showAnalyticsModal}
           url={selectedUrl}
           onClose={() => setShowAnalyticsModal(false)}
         />

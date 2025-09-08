@@ -15,28 +15,6 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Add IP and geo-location middleware
-app.use((req, res, next) => {
-  // Get real IP address
-  req.ip = req.headers['x-forwarded-for'] || 
-           req.headers['x-real-ip'] || 
-           req.connection.remoteAddress || 
-           req.socket.remoteAddress ||
-           (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
-           '127.0.0.1';
-  
-  // Basic geo-location (you can enhance this with a proper geo-IP service)
-  req.geoip = {
-    country: 'Unknown',
-    country_code: 'XX',
-    region: 'Unknown',
-    city: 'Unknown',
-    timezone: 'UTC'
-  };
-  
-  next();
-});
-
 // Database connection
 const connectDB = async () => {
   try {
@@ -75,15 +53,6 @@ try {
   console.error('Error loading analyticsRoutes:', error.message);
 }
 
-// Temporarily disabled advanced analytics routes - will fix route handler issue
-// try {
-//   const advancedAnalyticsRoutes = require('./routes/advancedAnalyticsRoutes');
-//   app.use('/api/advanced-analytics', advancedAnalyticsRoutes);
-//   console.log('✓ Advanced Analytics routes loaded');
-// } catch (error) {
-//   console.error('Error loading advancedAnalyticsRoutes:', error.message);
-// }
-
 try {
   const userRoutes = require('./routes/userRoutes');
   app.use('/api/user', userRoutes);
@@ -92,44 +61,30 @@ try {
   console.error('Error loading userRoutes:', error.message);
 }
 
-// Enhanced redirect route with analytics tracking
+// Simple redirect route
 app.get('/:shortId', async (req, res) => {
   try {
     const { shortId } = req.params;
-    const advancedAnalyticsController = require('./controllers/advancedAnalyticsController');
+    const Url = require('./models/Url');
+    const url = await Url.findOne({ shortId });
     
-    // Use the advanced analytics tracking
-    req.params = { shortCode: shortId };
-    await advancedAnalyticsController.trackClick(req, res);
+    if (!url) {
+      return res.status(404).send('URL not found');
+    }
     
+    // Update click count
+    await Url.findOneAndUpdate(
+      { shortId },
+      { 
+        $inc: { clicks: 1 },
+        $set: { lastAccessed: new Date() }
+      }
+    );
+    
+    res.redirect(url.originalUrl);
   } catch (error) {
     console.error('Redirect error:', error);
-    
-    // Fallback to simple redirect
-    try {
-      const Url = require('./models/Url');
-      const url = await Url.findOne({ 
-        $or: [{ shortId }, { shortCode: shortId }] 
-      });
-      
-      if (!url) {
-        return res.status(404).send('URL not found');
-      }
-      
-      // Update click count
-      await Url.findOneAndUpdate(
-        { $or: [{ shortId }, { shortCode: shortId }] },
-        { 
-          $inc: { clicks: 1 },
-          $set: { lastAccessed: new Date() }
-        }
-      );
-      
-      res.redirect(url.originalUrl);
-    } catch (fallbackError) {
-      console.error('Fallback redirect error:', fallbackError);
-      res.status(500).send('Server error');
-    }
+    res.status(500).send('Server error');
   }
 });
 

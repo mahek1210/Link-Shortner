@@ -145,9 +145,37 @@ export const urlAPI = {
     return response.data;
   },
 
-  getAnalytics: async (shortId: string): Promise<Analytics> => {
-    const response = await api.get(`/analytics/${shortId}`);
-    return response.data.data;
+  getAnalytics: async (shortId: string, params?: { timeRange?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams();
+    if (params?.timeRange) queryParams.append('timeRange', params.timeRange);
+    
+    const url = `/advanced-analytics/url/${shortId}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+    const response = await api.get(url);
+    return response.data;
+  },
+
+  getRealtimeStats: async (shortId: string): Promise<any> => {
+    const response = await api.get(`/advanced-analytics/realtime/${shortId}`);
+    return response.data;
+  },
+
+  exportAnalytics: async (shortId: string, params?: { format?: 'json' | 'csv'; timeRange?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams();
+    if (params?.format) queryParams.append('format', params.format);
+    if (params?.timeRange) queryParams.append('timeRange', params.timeRange);
+    
+    const url = `/advanced-analytics/export/${shortId}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+    const response = await api.get(url);
+    return response.data;
+  },
+
+  getUserAnalyticsSummary: async (params?: { timeRange?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams();
+    if (params?.timeRange) queryParams.append('timeRange', params.timeRange);
+    
+    const url = `/advanced-analytics/summary${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+    const response = await api.get(url);
+    return response.data;
   },
 
   generateQR: async (id: string): Promise<{ qrCode: string; shortUrl: string }> => {

@@ -20,7 +20,7 @@ if (!process.env.JWT_SECRET) {
 // Generate JWT token
 const generateToken = (userId) => {
   return jwt.sign(
-    { userId }, 
+    { id: userId }, 
     process.env.JWT_SECRET, 
     {
       expiresIn: '7d',

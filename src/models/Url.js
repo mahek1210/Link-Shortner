@@ -1,12 +1,59 @@
-// src/models/Url.js
+// src/models/Url.js - Fixed URL Model with proper analytics support
 const mongoose = require('mongoose');
 const { nanoid } = require('nanoid');
+
+const clickHistorySchema = new mongoose.Schema({
+  timestamp: {
+    type: Date,
+    default: Date.now
+  },
+  ip: {
+    type: String,
+    default: 'unknown'
+  },
+  userAgent: {
+    type: String,
+    default: ''
+  },
+  referrer: {
+    type: String,
+    default: ''
+  },
+  device: {
+    type: String,
+    enum: ['Mobile', 'Tablet', 'Desktop', 'Unknown'],
+    default: 'Unknown'
+  },
+  browser: {
+    type: String,
+    default: 'Unknown'
+  },
+  os: {
+    type: String,
+    default: 'Unknown'
+  },
+  country: {
+    type: String,
+    default: 'Unknown'
+  },
+  city: {
+    type: String,
+    default: 'Unknown'
+  }
+}, { _id: false });
 
 const urlSchema = new mongoose.Schema({
   originalUrl: { 
     type: String, 
     required: true,
     trim: true
+  },
+  shortId: { 
+    type: String, 
+    required: true, 
+    unique: true,
+    trim: true,
+    default: () => nanoid(8)
   },
   shortCode: { 
     type: String, 
@@ -29,6 +76,10 @@ const urlSchema = new mongoose.Schema({
     type: Number, 
     default: 0 
   },
+  clickHistory: [clickHistorySchema],
+  lastAccessed: {
+    type: Date
+  },
   lastClicked: {
     type: Date
   },
@@ -37,8 +88,7 @@ const urlSchema = new mongoose.Schema({
     default: Date.now 
   },
   expiresAt: {
-    type: Date,
-    index: { expireAfterSeconds: 0 } // TTL index for automatic cleanup
+    type: Date
   },
   password: {
     type: String,
@@ -51,14 +101,155 @@ const urlSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  title: {
+    type: String,
+    default: ''
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  qrCode: {
+    type: String, // Base64 encoded QR code
+    default: null
   }
+}, {
+  timestamps: true, // Automatically manage createdAt and updatedAt
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Indexes for performance
-urlSchema.index({ shortCode: 1 });
-urlSchema.index({ customAlias: 1 }, { sparse: true });
-urlSchema.index({ userId: 1, createdAt: -1 }); // For user's URL queries
-urlSchema.index({ userId: 1, isActive: 1 }); // For active URL queries
-urlSchema.index({ expiresAt: 1 }, { sparse: true }); // For expiry queries
+// Indexes for better performance
+urlSchema.index({ userId: 1, createdAt: -1 });
+urlSchema.index({ lastAccessed: 1 });
+urlSchema.index({ clicks: -1 });
+urlSchema.index({ isActive: 1 });
+
+// Virtual for unique visitors count
+urlSchema.virtual('uniqueVisitors').get(function() {
+  if (!this.clickHistory || this.clickHistory.length === 0) {
+    return 0;
+  }
+  const uniqueIPs = [...new Set(this.clickHistory.map(click => click.ip))];
+  return uniqueIPs.length;
+});
+
+// Virtual for recent clicks (last 7 days)
+urlSchema.virtual('recentClicks').get(function() {
+  if (!this.clickHistory || this.clickHistory.length === 0) {
+    return [];
+  }
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  return this.clickHistory.filter(click => 
+    new Date(click.timestamp) >= sevenDaysAgo
+  );
+});
+
+// Pre-save middleware
+urlSchema.pre('save', function(next) {
+  // Update the updatedAt field
+  this.updatedAt = new Date();
+  
+  // Ensure clicks count matches clickHistory length
+  if (this.clickHistory) {
+    this.clicks = this.clickHistory.length;
+  }
+  
+  // Auto-deactivate expired URLs
+  if (this.expiresAt && new Date() > this.expiresAt) {
+    this.isActive = false;
+  }
+  
+  next();
+});
+
+// Static method to find active URLs
+urlSchema.statics.findActive = function() {
+  return this.find({ 
+    isActive: true,
+    $or: [
+      { expiresAt: null },
+      { expiresAt: { $gt: new Date() } }
+    ]
+  });
+};
+
+// Instance method to check if URL is expired
+urlSchema.methods.isExpired = function() {
+  return this.expiresAt && new Date() > this.expiresAt;
+};
+
+// Instance method to get analytics summary
+urlSchema.methods.getAnalyticsSummary = function() {
+  const summary = {
+    totalClicks: this.clicks || 0,
+    uniqueVisitors: this.uniqueVisitors,
+    recentClicks: this.recentClicks.length,
+    lastAccessed: this.lastAccessed,
+    isActive: this.isActive && !this.isExpired()
+  };
+  
+  if (this.clickHistory && this.clickHistory.length > 0) {
+    // Browser stats
+    const browserCount = {};
+    this.clickHistory.forEach(click => {
+      browserCount[click.browser] = (browserCount[click.browser] || 0) + 1;
+    });
+    summary.topBrowser = Object.entries(browserCount)
+      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'Unknown';
+    
+    // Device stats
+    const deviceCount = {};
+    this.clickHistory.forEach(click => {
+      deviceCount[click.device] = (deviceCount[click.device] || 0) + 1;
+    });
+    summary.topDevice = Object.entries(deviceCount)
+      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'Unknown';
+    
+    // Geographic stats
+    const countryCount = {};
+    this.clickHistory.forEach(click => {
+      const country = click.country || 'Unknown';
+      countryCount[country] = (countryCount[country] || 0) + 1;
+    });
+    summary.topCountry = Object.entries(countryCount)
+      .sort(([,a], [,b]) => b - a)[0]?.[0] || 'Unknown';
+  }
+  
+  return summary;
+};
+
+// Instance method to add click
+urlSchema.methods.addClick = function(clickData = {}) {
+  const click = {
+    timestamp: new Date(),
+    ip: clickData.ip || 'unknown',
+    userAgent: clickData.userAgent || '',
+    referrer: clickData.referrer || '',
+    device: clickData.device || 'Unknown',
+    browser: clickData.browser || 'Unknown',
+    os: clickData.os || 'Unknown',
+    country: clickData.country || 'Unknown',
+    city: clickData.city || 'Unknown'
+  };
+  
+  this.clickHistory.push(click);
+  this.clicks = this.clickHistory.length;
+  this.lastAccessed = new Date();
+  
+  return this.save();
+};
+
+// Clean up old click history (keep last 1000 clicks per URL)
+urlSchema.pre('save', function(next) {
+  if (this.clickHistory && this.clickHistory.length > 1000) {
+    // Keep only the most recent 1000 clicks
+    this.clickHistory = this.clickHistory.slice(-1000);
+  }
+  next();
+});
 
 module.exports = mongoose.model('Url', urlSchema);
