@@ -12,43 +12,95 @@ import {
   Pagination
 } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL ? `${process.env.REACT_APP_API_URL}/api` : 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000, // Increased timeout for better reliability
+  withCredentials: true,
   headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Request interceptor to add auth token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-    console.log('API Request:', {
-      method: config.method?.toUpperCase(),
-      url: config.url,
-      headers: config.headers,
-      data: config.data
-    });
-  } else {
-    console.warn('No authentication token found in localStorage');
+    'Content-Type': 'application/json'
   }
-  return config;
 });
 
-// Response interceptor to handle auth errors
+// Simple in-memory cache for GET requests
+const cache = new Map<string, { data: any; timestamp: number; ttl: number }>();
+
+const getCacheKey = (url: string, params?: any) => {
+  return `${url}${params ? JSON.stringify(params) : ''}`;
+};
+
+const getCachedData = (key: string) => {
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < cached.ttl) {
+    return cached.data;
+  }
+  cache.delete(key);
+  return null;
+};
+
+const setCachedData = (key: string, data: any, ttl = 300000) => { // 5 minutes default
+  cache.set(key, { data, timestamp: Date.now(), ttl });
+};
+
+// Request interceptor to add auth token and handle caching
+api.interceptors.request.use(
+  (config) => {
+    // Only add token for protected routes, not for signup/login
+    const isAuthRoute = config.url?.includes('/auth/signup') || config.url?.includes('/auth/login');
+    
+    if (!isAuthRoute) {
+      const token = localStorage.getItem('token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    
+    // Check cache for GET requests
+    if (config.method === 'get') {
+      const cacheKey = getCacheKey(config.url || '', config.params);
+      const cachedData = getCachedData(cacheKey);
+      if (cachedData) {
+        // Return cached response
+        return Promise.reject({
+          __CACHED_RESPONSE__: true,
+          data: cachedData
+        });
+      }
+    }
+    
+    console.log('API Request:', config.method?.toUpperCase(), config.url);
+    return config;
+  },
+  (error) => {
+    console.error('Request interceptor error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor to handle auth errors and caching
 api.interceptors.response.use(
   (response) => {
-    console.log('API Response:', {
-      status: response.status,
-      url: response.config.url,
-      data: response.data
-    });
+    // Store token from successful auth responses
+    if (response.data?.token) {
+      localStorage.setItem('token', response.data.token);
+    }
+    
+    // Cache GET responses
+    if (response.config.method === 'get') {
+      const cacheKey = getCacheKey(response.config.url || '', response.config.params);
+      const ttl = response.config.url?.includes('/analytics') ? 60000 : 300000; // Analytics cache for 1 min, others 5 min
+      setCachedData(cacheKey, response.data, ttl);
+    }
+    
     return response;
   },
   (error) => {
+    // Handle cached responses
+    if (error.__CACHED_RESPONSE__) {
+      return Promise.resolve({ data: error.data });
+    }
+    
     console.error('API Error:', {
       status: error.response?.status,
       url: error.config?.url,
@@ -56,25 +108,52 @@ api.interceptors.response.use(
       message: error.message
     });
     
+    // Handle 401 - unauthorized
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      localStorage.removeItem('tokenLastCheck');
+      // Clear cache on auth failure
+      cache.clear();
+      // Redirect to login if not already on auth pages
+      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/signup')) {
+        window.location.href = '/login';
+      }
     }
+    
     return Promise.reject(error);
   }
 );
 
+// Clear cache function
+export const clearCache = () => {
+  cache.clear();
+};
+
 // Auth API
 export const authAPI = {
   signup: async (data: SignupData): Promise<AuthResponse> => {
-    const response = await api.post('/auth/signup', data);
-    return response.data;
+    try {
+      const response = await api.post('/auth/signup', data);
+      // Clear cache after successful signup
+      clearCache();
+      return response.data;
+    } catch (error: any) {
+      console.error('Signup error:', error.response?.data || error.message);
+      throw error;
+    }
   },
 
   login: async (data: LoginData): Promise<AuthResponse> => {
-    const response = await api.post('/auth/login', data);
-    return response.data;
+    try {
+      const response = await api.post('/auth/login', data);
+      // Clear cache after successful login
+      clearCache();
+      return response.data;
+    } catch (error: any) {
+      console.error('Login error:', error.response?.data || error.message);
+      throw error;
+    }
   },
 
   getProfile: async (): Promise<{ user: User }> => {
@@ -103,6 +182,13 @@ export const urlAPI = {
     if (!response.data.success) {
       throw new Error(response.data.error || 'Failed to create URL');
     }
+    
+    // Clear relevant cache entries
+    cache.forEach((_, key) => {
+      if (key.includes('/user/urls') || key.includes('/summary')) {
+        cache.delete(key);
+      }
+    });
     
     // Transform the response to match the Url interface
     const urlData: Url = {
@@ -137,11 +223,27 @@ export const urlAPI = {
 
   updateUrl: async (id: string, data: UpdateUrlData): Promise<{ message: string; url: Url }> => {
     const response = await api.put(`/user/urls/${id}`, data);
+    
+    // Clear relevant cache entries
+    cache.forEach((_, key) => {
+      if (key.includes('/user/urls') || key.includes(id)) {
+        cache.delete(key);
+      }
+    });
+    
     return response.data;
   },
 
   deleteUrl: async (id: string): Promise<{ message: string }> => {
     const response = await api.delete(`/user/urls/${id}`);
+    
+    // Clear relevant cache entries
+    cache.forEach((_, key) => {
+      if (key.includes('/user/urls') || key.includes('/summary') || key.includes(id)) {
+        cache.delete(key);
+      }
+    });
+    
     return response.data;
   },
 
@@ -155,7 +257,10 @@ export const urlAPI = {
   },
 
   getRealtimeStats: async (shortId: string): Promise<any> => {
-    const response = await api.get(`/advanced-analytics/realtime/${shortId}`);
+    // Don't cache realtime stats
+    const response = await api.get(`/advanced-analytics/realtime/${shortId}`, {
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     return response.data;
   },
 
@@ -214,11 +319,27 @@ export const adminAPI = {
 
   updateUserStatus: async (id: string, data: { isActive?: boolean; role?: string }): Promise<{ message: string; user: User }> => {
     const response = await api.put(`/admin/users/${id}`, data);
+    
+    // Clear user-related cache
+    cache.forEach((_, key) => {
+      if (key.includes('/admin/users') || key.includes(id)) {
+        cache.delete(key);
+      }
+    });
+    
     return response.data;
   },
 
   deleteUrl: async (id: string): Promise<{ message: string }> => {
     const response = await api.delete(`/admin/urls/${id}`);
+    
+    // Clear relevant cache entries
+    cache.forEach((_, key) => {
+      if (key.includes('/admin/urls') || key.includes(id)) {
+        cache.delete(key);
+      }
+    });
+    
     return response.data;
   },
 };

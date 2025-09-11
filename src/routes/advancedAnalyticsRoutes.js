@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const advancedAnalyticsController = require('../controllers/advancedAnalyticsController');
-const auth = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 
 // Track click (public route - no auth required)
 router.get('/track/:shortCode', advancedAnalyticsController.trackClick);

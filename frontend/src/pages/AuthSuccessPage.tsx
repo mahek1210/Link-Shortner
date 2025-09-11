@@ -14,6 +14,7 @@ export const AuthSuccessPage: React.FC = () => {
   useEffect(() => {
     const handleAuthSuccess = async () => {
       const token = searchParams.get('token');
+      const userParam = searchParams.get('user');
       
       if (!token) {
         setError('No authentication token received');
@@ -22,15 +23,34 @@ export const AuthSuccessPage: React.FC = () => {
       }
 
       try {
-        // Verify the token and get user data
-        const response = await authAPI.getProfileWithToken(token);
-        login(token, response.user);
+        let userData;
         
-        // Redirect to dashboard
-        navigate('/dashboard', { replace: true });
+        // Try to get user data from URL parameter first (Google OAuth)
+        if (userParam) {
+          try {
+            userData = JSON.parse(decodeURIComponent(userParam));
+          } catch (parseError) {
+            console.warn('Failed to parse user data from URL, fetching from API');
+          }
+        }
+        
+        // If no user data in URL, fetch from API
+        if (!userData) {
+          const response = await authAPI.getProfileWithToken(token);
+          userData = response.user;
+        }
+        
+        // Store authentication data
+        login(token, userData);
+        
+        // Show success message briefly before redirect
+        setTimeout(() => {
+          navigate('/dashboard', { replace: true });
+        }, 1000);
+        
       } catch (error: any) {
         console.error('Auth success error:', error);
-        setError(error.response?.data?.error || 'Authentication failed');
+        setError(error.response?.data?.message || error.message || 'Authentication failed');
         setLoading(false);
       }
     };

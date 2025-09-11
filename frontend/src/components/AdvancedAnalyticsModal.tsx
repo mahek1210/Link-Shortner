@@ -153,17 +153,17 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
     setError(null);
     
     try {
-      const shortCode = url.shortCode || url.shortId;
-      const response = await urlAPI.getAnalytics(shortCode, { timeRange });
+      const response = await urlAPI.getAnalytics(url.shortId, { timeRange });
+      console.log('Advanced Analytics response:', response);
       
-      if (response.success) {
+      if (response.success && response.data) {
         setAnalytics(response.data.analytics);
       } else {
         setError(response.message || 'Failed to fetch analytics');
       }
-    } catch (err: any) {
-      console.error('Analytics fetch error:', err);
-      setError(err.response?.data?.message || 'Error fetching analytics');
+    } catch (err) {
+      console.error('Advanced Analytics fetch error:', err);
+      setError('Failed to fetch analytics data');
     } finally {
       setLoading(false);
     }
@@ -378,7 +378,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h3 className="text-lg font-semibold mb-4">Daily Activity</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                      <AreaChart data={analytics.dailyStats}>
+                      <AreaChart data={analytics.dailyStats || []}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis 
                           dataKey="date" 
@@ -417,7 +417,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Top Countries</h3>
                       <div className="space-y-3">
-                        {analytics.topCountries.slice(0, 5).map((country, index) => (
+                        {(analytics.topCountries || []).slice(0, 5).map((country, index) => (
                           <div key={country.country} className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                               <span className="text-2xl">{country.countryCode === 'US' ? '🇺🇸' : '🌍'}</span>
@@ -436,7 +436,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Device Types</h3>
                       <div className="space-y-3">
-                        {analytics.deviceStats.map((device, index) => (
+                        {(analytics.deviceStats || []).map((device, index) => (
                           <div key={device.device} className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                               {getDeviceIcon(device.device)}
@@ -473,7 +473,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                             fill="#8884d8"
                             dataKey="count"
                           >
-                            {analytics.referrerStats.map((entry, index) => (
+                            {(analytics.referrerStats || []).map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                           </Pie>
@@ -485,7 +485,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Referrer Details</h3>
                       <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {analytics.referrerStats.map((referrer, index) => (
+                        {(analytics.referrerStats || []).map((referrer, index) => (
                           <div key={referrer.referrer} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                             <div>
                               <p className="font-medium capitalize">{referrer.referrer}</p>
@@ -505,7 +505,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h3 className="text-lg font-semibold mb-4">Hourly Traffic Pattern</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={analytics.hourlyPattern}>
+                      <BarChart data={analytics.hourlyPattern || []}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="hour" />
                         <YAxis />
@@ -519,7 +519,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h3 className="text-lg font-semibold mb-4">Weekly Traffic Pattern</h3>
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={analytics.weeklyPattern.map(item => ({
+                      <BarChart data={(analytics.weeklyPattern || []).map(item => ({
                         ...item,
                         dayName: formatDayName(item.day)
                       }))}>
@@ -540,7 +540,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h3 className="text-lg font-semibold mb-4">Geographic Distribution</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {analytics.topCountries.map((country, index) => (
+                      {(analytics.topCountries || []).map((country, index) => (
                         <div key={country.country} className="p-4 bg-gray-50 rounded-lg">
                           <div className="flex items-center justify-between mb-2">
                             <span className="font-medium">{country.country}</span>
@@ -568,7 +568,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Browsers</h3>
                       <div className="space-y-3">
-                        {analytics.browserStats.slice(0, 8).map((browser, index) => (
+                        {(analytics.browserStats || []).slice(0, 8).map((browser, index) => (
                           <div key={browser.browser} className="flex items-center justify-between">
                             <span className="font-medium">{browser.browser}</span>
                             <div className="flex items-center space-x-2">
@@ -589,7 +589,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
                       <h3 className="text-lg font-semibold mb-4">Operating Systems</h3>
                       <div className="space-y-3">
-                        {analytics.osStats.slice(0, 8).map((os, index) => (
+                        {(analytics.osStats || []).slice(0, 8).map((os, index) => (
                           <div key={os.os} className="flex items-center justify-between">
                             <span className="font-medium">{os.os}</span>
                             <div className="flex items-center space-x-2">
@@ -626,7 +626,7 @@ const AdvancedAnalyticsModal: React.FC<AdvancedAnalyticsModalProps> = ({ isOpen,
                           </tr>
                         </thead>
                         <tbody>
-                          {analytics.recentClicks.map((click, index) => (
+                          {(analytics.recentClicks || []).map((click, index) => (
                             <tr key={index} className="border-b border-gray-100">
                               <td className="py-2">
                                 {format(parseISO(click.timestamp), 'MMM dd, HH:mm')}

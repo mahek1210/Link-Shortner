@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Search, Copy, QrCode, BarChart3, Calendar, Lock, TrendingUp, Users, MousePointer, Eye } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
@@ -11,16 +11,25 @@ import { CreateUrlModal } from '../components/CreateUrlModal';
 import { QRModal } from '../components/QRModal';
 import AdvancedAnalyticsModal from '../components/AdvancedAnalyticsModal';
 
+// Debounce hook for search optimization
+const useDebounce = (value: string, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+};
+
 export const DashboardPage: React.FC = () => {
   const [urls, setUrls] = useState<Url[]>([]);
-  
-  // Debug: Log when URLs state changes
-  useEffect(() => {
-    console.log('URLs state updated. Count:', urls.length);
-    if (urls.length > 0) {
-      console.log('First URL:', urls[0]);
-    }
-  }, [urls]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -31,34 +40,105 @@ export const DashboardPage: React.FC = () => {
   const [analyticsSummary, setAnalyticsSummary] = useState<any>(null);
   const [selectedUrl, setSelectedUrl] = useState<Url | null>(null);
   const [copySuccess, setCopySuccess] = useState<string | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
 
-  const fetchUrls = async () => {
+  // Debounce search term to reduce API calls
+  const debouncedSearchTerm = useDebounce(searchTerm, 500);
+
+  // Memoize analytics summary to prevent unnecessary re-renders
+  const analyticsSummaryCards = useMemo(() => {
+    if (!analyticsSummary) return null;
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-blue-600 text-sm font-medium">Total URLs</p>
+              <p className="text-3xl font-bold text-blue-900">{analyticsSummary.totalUrls}</p>
+            </div>
+            <BarChart3 className="w-8 h-8 text-blue-600" />
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-green-600 text-sm font-medium">Total Clicks</p>
+              <p className="text-3xl font-bold text-green-900">{analyticsSummary.totalClicks}</p>
+            </div>
+            <MousePointer className="w-8 h-8 text-green-600" />
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-purple-600 text-sm font-medium">Unique Visitors</p>
+              <p className="text-3xl font-bold text-purple-900">{analyticsSummary.totalUniqueVisitors}</p>
+            </div>
+            <Users className="w-8 h-8 text-purple-600" />
+          </div>
+        </div>
+        
+        <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg border border-orange-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-orange-600 text-sm font-medium">Click Rate</p>
+              <p className="text-3xl font-bold text-orange-900">{analyticsSummary.summary?.clickRate || 0}</p>
+              <p className="text-sm text-orange-600">/day</p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-orange-600" />
+          </div>
+        </div>
+      </div>
+    );
+  }, [analyticsSummary]);
+
+  const fetchUrls = useCallback(async (page = 1, search = '') => {
     try {
       setLoading(true);
-      const response = await urlAPI.getUserUrls(currentPage, 10, searchTerm);
+      const response = await urlAPI.getUserUrls(page, 10, search);
       console.log('Fetched URLs from server:', response.urls.length);
       setUrls(response.urls);
       setTotalPages(response.pagination.pages);
-      
-      // Fetch analytics summary
-      try {
-        const summaryResponse = await urlAPI.getUserAnalyticsSummary({ timeRange: '30d' });
-        if (summaryResponse.success) {
-          setAnalyticsSummary(summaryResponse.data);
-        }
-      } catch (summaryError) {
-        console.error('Failed to fetch analytics summary:', summaryError);
-      }
     } catch (error) {
       console.error('Failed to fetch URLs:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  const fetchAnalyticsSummary = useCallback(async () => {
+    try {
+      setAnalyticsLoading(true);
+      const summaryResponse = await urlAPI.getUserAnalyticsSummary({ timeRange: '30d' });
+      if (summaryResponse.success) {
+        setAnalyticsSummary(summaryResponse.data);
+      }
+    } catch (summaryError) {
+      console.error('Failed to fetch analytics summary:', summaryError);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, []);
+
+  // Fetch URLs when page or debounced search term changes
   useEffect(() => {
-    fetchUrls();
-  }, [currentPage, searchTerm]);
+    fetchUrls(currentPage, debouncedSearchTerm);
+  }, [currentPage, debouncedSearchTerm, fetchUrls]);
+
+  // Fetch analytics summary only once on mount
+  useEffect(() => {
+    fetchAnalyticsSummary();
+  }, [fetchAnalyticsSummary]);
+
+  // Reset page when search term changes
+  useEffect(() => {
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+    }
+  }, [debouncedSearchTerm]);
 
   const handleCreateUrl = async (data: CreateUrlData) => {
     try {
@@ -81,12 +161,11 @@ export const DashboardPage: React.FC = () => {
       setCopySuccess('Link created successfully!');
       setTimeout(() => setCopySuccess(null), 3000);
       
-      // REMOVED: Don't refresh the list - it overwrites the state
-      // The new URL is already added to the state above
+      // Update analytics summary
+      fetchAnalyticsSummary();
       
     } catch (error: any) {
       console.error('Dashboard: Failed to create URL:', error);
-      // Re-throw the error so the modal can handle it
       throw error;
     }
   };
@@ -95,9 +174,14 @@ export const DashboardPage: React.FC = () => {
     if (window.confirm('Are you sure you want to delete this URL?')) {
       try {
         await urlAPI.deleteUrl(id);
-        fetchUrls();
+        // Remove from local state immediately
+        setUrls(prevUrls => prevUrls.filter(url => url.id !== id));
+        // Update analytics summary
+        fetchAnalyticsSummary();
       } catch (error) {
         console.error('Failed to delete URL:', error);
+        // Refresh on error
+        fetchUrls(currentPage, debouncedSearchTerm);
       }
     }
   };
@@ -134,49 +218,16 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           {/* Analytics Summary Cards */}
-          {analyticsSummary && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-blue-600 text-sm font-medium">Total URLs</p>
-                    <p className="text-3xl font-bold text-blue-900">{analyticsSummary.totalUrls}</p>
-                  </div>
-                  <BarChart3 className="w-8 h-8 text-blue-600" />
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-green-600 text-sm font-medium">Total Clicks</p>
-                    <p className="text-3xl font-bold text-green-900">{analyticsSummary.totalClicks}</p>
-                  </div>
-                  <MousePointer className="w-8 h-8 text-green-600" />
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border border-purple-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-purple-600 text-sm font-medium">Unique Visitors</p>
-                    <p className="text-3xl font-bold text-purple-900">{analyticsSummary.totalUniqueVisitors}</p>
-                  </div>
-                  <Users className="w-8 h-8 text-purple-600" />
-                </div>
-              </div>
-              
-              <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg border border-orange-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-orange-600 text-sm font-medium">Click Rate</p>
-                    <p className="text-3xl font-bold text-orange-900">{analyticsSummary.summary?.clickRate || 0}</p>
-                    <p className="text-sm text-orange-600">/day</p>
-                  </div>
-                  <TrendingUp className="w-8 h-8 text-orange-600" />
-                </div>
+          {analyticsLoading ? (
+            <div className="mb-8">
+              <div className="animate-pulse grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="bg-gray-200 h-24 rounded-lg"></div>
+                ))}
               </div>
             </div>
+          ) : (
+            analyticsSummaryCards
           )}
 
           <div className="flex justify-between items-center mb-8">
@@ -201,6 +252,9 @@ export const DashboardPage: React.FC = () => {
                       className="pl-10 w-64"
                     />
                   </div>
+                  {searchTerm && searchTerm !== debouncedSearchTerm && (
+                    <div className="text-sm text-gray-500">Searching...</div>
+                  )}
                 </div>
                 <Button
                   onClick={() => setShowCreateModal(true)}
@@ -214,7 +268,20 @@ export const DashboardPage: React.FC = () => {
 
             {loading ? (
               <div className="p-8 text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading your links...</p>
+              </div>
+            ) : urls.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-gray-500 mb-4">
+                  {searchTerm ? 'No links found matching your search.' : 'No links created yet.'}
+                </p>
+                {!searchTerm && (
+                  <Button onClick={() => setShowCreateModal(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Your First Link
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -381,8 +448,8 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {copySuccess && (
-        <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg">
-          Copied to clipboard!
+        <div className="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg z-50">
+          {copySuccess === 'Link created successfully!' ? copySuccess : 'Copied to clipboard!'}
         </div>
       )}
     </div>

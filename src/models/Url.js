@@ -98,6 +98,12 @@ const urlSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
+  status: {
+    type: String,
+    enum: ['active', 'expired', 'deleted', 'disabled', 'flagged'],
+    default: 'active',
+    index: true
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -113,7 +119,59 @@ const urlSchema = new mongoose.Schema({
   qrCode: {
     type: String, // Base64 encoded QR code
     default: null
-  }
+  },
+  
+  // Content moderation fields
+  moderationFlags: [{
+    type: String,
+    enum: ['suspicious_pattern', 'blocked_domain', 'malicious_keywords', 'poor_reputation', 'nested_shortener', 'suspicious_user']
+  }],
+  moderationScore: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100
+  },
+  disabledReason: {
+    type: String,
+    default: null
+  },
+  disabledAt: {
+    type: Date,
+    default: null
+  },
+  reportCount: {
+    type: Number,
+    default: 0
+  },
+  reports: [{
+    reporterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    reportType: {
+      type: String,
+      enum: ['malicious', 'spam', 'phishing', 'malware', 'inappropriate', 'copyright'],
+      required: true
+    },
+    description: String,
+    category: {
+      type: String,
+      enum: ['security', 'content', 'legal', 'other'],
+      default: 'other'
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'reviewed', 'resolved', 'dismissed'],
+      default: 'pending'
+    },
+    ipHash: String
+  }]
 }, {
   timestamps: true, // Automatically manage createdAt and updatedAt
   toJSON: { virtuals: true },
@@ -150,16 +208,11 @@ urlSchema.virtual('recentClicks').get(function() {
 
 // Pre-save middleware
 urlSchema.pre('save', function(next) {
-  // Update the updatedAt field
   this.updatedAt = new Date();
   
-  // Ensure clicks count matches clickHistory length
-  if (this.clickHistory) {
-    this.clicks = this.clickHistory.length;
-  }
-  
-  // Auto-deactivate expired URLs
-  if (this.expiresAt && new Date() > this.expiresAt) {
+  // Auto-mark expired URLs (don't delete, just mark as expired)
+  if (this.expiresAt && new Date() > this.expiresAt && this.status === 'active') {
+    this.status = 'expired';
     this.isActive = false;
   }
   
@@ -180,6 +233,16 @@ urlSchema.statics.findActive = function() {
 // Instance method to check if URL is expired
 urlSchema.methods.isExpired = function() {
   return this.expiresAt && new Date() > this.expiresAt;
+};
+
+// Instance method to check if URL requires password
+urlSchema.methods.requiresPassword = function() {
+  return !!this.password;
+};
+
+// Instance method to verify password
+urlSchema.methods.verifyPassword = function(inputPassword) {
+  return this.password === inputPassword;
 };
 
 // Instance method to get analytics summary

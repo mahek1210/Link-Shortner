@@ -5,8 +5,7 @@ const mongoose = require('mongoose');
 const clickSchema = new mongoose.Schema({
   timestamp: {
     type: Date,
-    default: Date.now,
-    index: true
+    default: Date.now
   },
   ip: {
     type: String,
@@ -14,8 +13,7 @@ const clickSchema = new mongoose.Schema({
   },
   hashedIp: {
     type: String, // For privacy-compliant unique visitor tracking
-    required: true,
-    index: true
+    required: true
   },
   userAgent: {
     type: String,
@@ -110,8 +108,7 @@ const clickSchema = new mongoose.Schema({
   },
   // Session tracking
   sessionId: {
-    type: String,
-    index: true
+    type: String
   },
   isUniqueVisitor: {
     type: Boolean,
@@ -131,13 +128,11 @@ const analyticsSchema = new mongoose.Schema({
   urlId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Url',
-    required: true,
-    index: true
+    required: true
   },
   shortCode: {
     type: String,
-    required: true,
-    index: true
+    required: true
   },
   // Individual clicks
   clicks: [clickSchema],

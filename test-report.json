@@ -1,0 +1,59 @@
+{
+  "timestamp": "2025-09-10T16:24:44.009Z",
+  "summary": {
+    "total": 11,
+    "passed": 7,
+    "failed": 4,
+    "success_rate": "64%"
+  },
+  "tests": [
+    {
+      "name": "Database Connection",
+      "status": "PASSED"
+    },
+    {
+      "name": "Server Health Check",
+      "status": "FAILED",
+      "error": "Request failed with status code 404"
+    },
+    {
+      "name": "User Registration",
+      "status": "PASSED"
+    },
+    {
+      "name": "User Login",
+      "status": "PASSED"
+    },
+    {
+      "name": "URL Shortening",
+      "status": "PASSED"
+    },
+    {
+      "name": "URL Redirection",
+      "status": "PASSED"
+    },
+    {
+      "name": "Analytics Tracking",
+      "status": "FAILED",
+      "error": "Request failed with status code 403"
+    },
+    {
+      "name": "Google OAuth Routes",
+      "status": "PASSED"
+    },
+    {
+      "name": "Rate Limiting Configuration",
+      "status": "FAILED",
+      "error": "Rate limiting is too aggressive in test environment"
+    },
+    {
+      "name": "Error Handling",
+      "status": "PASSED"
+    },
+    {
+      "name": "Security Headers",
+      "status": "FAILED",
+      "error": "Health endpoint returned status: 404"
+    }
+  ]
+}

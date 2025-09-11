@@ -46,14 +46,44 @@ if (isGoogleOAuthConfigured) {
     callbackURL: process.env.GOOGLE_CALLBACK_URL
   }, async (accessToken, refreshToken, profile, done) => {
     try {
-      console.log('Google OAuth Profile:', profile);
-      
-      // Check if user already exists with this Google ID
+      // Check if user already exists with Google ID
       let user = await User.findOne({ googleId: profile.id });
       
       if (user) {
-        // User exists, update last login
+        // Update last login and ensure username exists
         user.lastLogin = new Date();
+        
+        // Ensure username exists for existing Google users
+        if (!user.username) {
+          let baseUsername = '';
+          
+          if (profile.displayName) {
+            baseUsername = profile.displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else if (profile.name && profile.name.givenName) {
+            baseUsername = profile.name.givenName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else if (profile.emails && profile.emails[0]) {
+            baseUsername = profile.emails[0].value.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else {
+            baseUsername = 'user' + profile.id.slice(-6);
+          }
+          
+          // Ensure minimum length
+          if (baseUsername.length < 3) {
+            baseUsername = baseUsername + profile.id.slice(-3);
+          }
+          
+          let username = baseUsername;
+          let counter = 1;
+          
+          // Ensure username is unique
+          while (await User.findOne({ username, _id: { $ne: user._id } })) {
+            username = `${baseUsername}${counter}`;
+            counter++;
+          }
+          
+          user.username = username;
+        }
+        
         await user.save();
         return done(null, user);
       }
@@ -67,14 +97,74 @@ if (isGoogleOAuthConfigured) {
         user.name = profile.displayName;
         user.avatar = profile.photos[0]?.value;
         user.lastLogin = new Date();
+        
+        // Ensure username exists for existing user
+        if (!user.username) {
+          let baseUsername = '';
+          
+          if (profile.displayName) {
+            baseUsername = profile.displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else if (profile.name && profile.name.givenName) {
+            baseUsername = profile.name.givenName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else if (profile.emails && profile.emails[0]) {
+            baseUsername = profile.emails[0].value.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+          } else {
+            baseUsername = 'user' + profile.id.slice(-6);
+          }
+          
+          // Ensure minimum length
+          if (baseUsername.length < 3) {
+            baseUsername = baseUsername + profile.id.slice(-3);
+          }
+          
+          let username = baseUsername;
+          let counter = 1;
+          
+          // Ensure username is unique
+          while (await User.findOne({ username, _id: { $ne: user._id } })) {
+            username = `${baseUsername}${counter}`;
+            counter++;
+          }
+          
+          user.username = username;
+        }
+        
         await user.save();
         return done(null, user);
+      }
+      
+      // Generate username from Google profile with fallbacks
+      let baseUsername = '';
+      
+      if (profile.displayName) {
+        baseUsername = profile.displayName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      } else if (profile.name && profile.name.givenName) {
+        baseUsername = profile.name.givenName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      } else if (profile.emails && profile.emails[0]) {
+        baseUsername = profile.emails[0].value.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      } else {
+        baseUsername = 'user' + profile.id.slice(-6); // fallback with Google ID
+      }
+      
+      // Ensure minimum length
+      if (baseUsername.length < 3) {
+        baseUsername = baseUsername + profile.id.slice(-3);
+      }
+      
+      let username = baseUsername;
+      let counter = 1;
+      
+      // Ensure username is unique
+      while (await User.findOne({ username })) {
+        username = `${baseUsername}${counter}`;
+        counter++;
       }
       
       // Create new user
       user = new User({
         googleId: profile.id,
         email: profile.emails[0].value,
+        username: username,
         name: profile.displayName,
         avatar: profile.photos[0]?.value,
         lastLogin: new Date()

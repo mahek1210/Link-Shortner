@@ -1,149 +1,165 @@
-// Working server without path-to-regexp error
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
+// src/index.js - Enhanced production-ready Link Shortener server with comprehensive error handling
 
-const app = express();
-
-// Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Add IP and geo-location middleware
-app.use((req, res, next) => {
-  // Get real IP address
-  req.ip = req.headers['x-forwarded-for'] || 
-           req.headers['x-real-ip'] || 
-           req.connection.remoteAddress || 
-           req.socket.remoteAddress ||
-           (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
-           '127.0.0.1';
-  
-  // Basic geo-location (you can enhance this with a proper geo-IP service)
-  req.geoip = {
-    country: 'Unknown',
-    country_code: 'XX',
-    region: 'Unknown',
-    city: 'Unknown',
-    timezone: 'UTC'
-  };
-  
-  next();
+// Add error handlers at the very top
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error.message);
+  console.error('Stack:', error.stack);
+  console.error('Process will exit...');
+  process.exit(1);
 });
 
-// Database connection
-const connectDB = async () => {
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
+  if (reason && reason.stack) {
+    console.error('Stack:', reason.stack);
+  }
+  console.error('Process will exit...');
+  process.exit(1);
+});
+
+// Environment variables
+console.log('🔧 Loading environment variables...');
+require('dotenv').config();
+console.log('✅ Environment variables loaded');
+
+// Import dependencies with try-catch
+let Application, logger;
+try {
+  console.log('📦 Importing dependencies...');
+  Application = require('./app');
+  logger = require('./config/logger');
+  console.log('✅ Dependencies imported successfully');
+} catch (error) {
+  console.error('❌ Failed to import dependencies:', error.message);
+  console.error('Stack:', error.stack);
+  process.exit(1);
+}
+
+// Enhanced server startup with step-by-step logging
+async function startServer() {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    console.log('🚀 Starting Link Shortener Server...');
+    logger.info('🚀 Starting Link Shortener Server...');
+    
+    // 1. Check environment variables
+    console.log('📋 Checking environment variables...');
+    logger.info('📋 Checking environment variables...');
+    
+    const requiredEnvVars = ['JWT_SECRET'];
+    const missingVars = [];
+    
+    // Check for MongoDB URI (allow both MONGO_URI and MONGODB_URI)
+    if (!process.env.MONGO_URI && !process.env.MONGODB_URI) {
+      missingVars.push('MONGO_URI or MONGODB_URI');
+    }
+    
+    for (const envVar of requiredEnvVars) {
+      if (!process.env[envVar]) {
+        missingVars.push(envVar);
+      }
+    }
+    
+    if (missingVars.length > 0) {
+      const errorMsg = `Missing required environment variables: ${missingVars.join(', ')}`;
+      console.error('❌', errorMsg);
+      logger.error(errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    console.log('✅ Environment variables validated');
+    logger.info('✅ Environment variables validated');
+
+    // 2. Initialize Application
+    console.log('⚡ Initializing Express application...');
+    logger.info('⚡ Initializing Express application...');
+    
+    const app = new Application();
+    const port = process.env.PORT || 5000;
+    
+    console.log('✅ Application instance created');
+    logger.info('✅ Application instance created');
+    
+    // 3. Start server (this will handle database connections internally)
+    console.log('🔌 Starting server and connecting to services...');
+    logger.info('🔌 Starting server and connecting to services...');
+    
+    await app.start(port);
+    
+    // 4. Success logging
+    console.log('🎉 Link Shortener application started successfully!');
+    console.log(`📊 Server running on http://localhost:${port}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV}`);
+    console.log(`🔗 Base URL: ${process.env.BASE_URL || `http://localhost:${port}`}`);
+    console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+    console.log(`📊 Health check: http://localhost:${port}/health`);
+    
+    logger.info('🎉 Link Shortener application started successfully!');
+    logger.info('📋 Application Features:');
+    logger.info('  ✅ Production-ready security (Helmet, CORS, Rate limiting)');
+    logger.info('  ✅ Redis caching and session management');
+    logger.info('  ✅ Comprehensive logging and monitoring');
+    logger.info('  ✅ Input validation and sanitization');
+    logger.info('  ✅ Error handling and graceful shutdown');
+    logger.info('  ✅ Database connection pooling and optimization');
+    logger.info('  ✅ API versioning and backward compatibility');
+    logger.info('  ✅ Health checks and metrics');
+    
+    // Performance monitoring
+    if (process.env.NODE_ENV === 'production') {
+      logger.info('🔍 Production monitoring enabled');
+      
+      // Log memory usage every 5 minutes
+      setInterval(() => {
+        const memUsage = process.memoryUsage();
+        logger.performance.apiResponse('memory_check', 'GET', 0, 200);
+        logger.info('Memory usage:', {
+          rss: `${Math.round(memUsage.rss / 1024 / 1024)} MB`,
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)} MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)} MB`,
+          external: `${Math.round(memUsage.external / 1024 / 1024)} MB`
+        });
+      }, 300000); // 5 minutes
+    }
+    
   } catch (error) {
-    console.error('Database connection failed:', error);
+    console.error('❌ Server startup failed:', error.message);
+    console.error('Stack:', error.stack);
+    
+    if (logger) {
+      logger.error('❌ Failed to start Link Shortener application:', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
+    
+    // Provide specific error guidance
+    if (error.message.includes('ECONNREFUSED') && error.message.includes('27017')) {
+      console.error('🔍 MongoDB Connection Issue:');
+      console.error('   - Make sure MongoDB is running locally');
+      console.error('   - Or update MONGO_URI in .env to use MongoDB Atlas');
+      console.error('   - Try: brew services start mongodb/brew/mongodb-community (macOS)');
+      console.error('   - Try: net start MongoDB (Windows)');
+    }
+    
+    if (error.message.includes('ECONNREFUSED') && error.message.includes('6379')) {
+      console.error('🔍 Redis Connection Issue:');
+      console.error('   - Make sure Redis is running locally');
+      console.error('   - Try: brew services start redis (macOS)');
+      console.error('   - Try: redis-server (to start Redis manually)');
+      console.error('   - Or comment out Redis usage in development');
+    }
+    
+    if (error.message.includes('EADDRINUSE')) {
+      console.error('🔍 Port Already in Use:');
+      console.error(`   - Port ${process.env.PORT || 5000} is already in use`);
+      console.error('   - Try a different port: PORT=3001 npm run dev');
+    }
+    
+    // Exit with error code
     process.exit(1);
   }
-};
-
-connectDB();
-
-// Routes
-try {
-  const authRoutes = require('./routes/authRoutes');
-  app.use('/api/auth', authRoutes);
-  console.log('✓ Auth routes loaded');
-} catch (error) {
-  console.error('Error loading authRoutes:', error.message);
 }
 
-try {
-  const shortenRoutes = require('./routes/shortenRoutes');
-  app.use('/api/shorten', shortenRoutes);
-  console.log('✓ Shorten routes loaded');
-} catch (error) {
-  console.error('Error loading shortenRoutes:', error.message);
-}
-
-try {
-  const analyticsRoutes = require('./routes/analyticsRoutes');
-  app.use('/api/analytics', analyticsRoutes);
-  console.log('✓ Analytics routes loaded');
-} catch (error) {
-  console.error('Error loading analyticsRoutes:', error.message);
-}
-
-// Temporarily disabled advanced analytics routes - will fix route handler issue
-// try {
-//   const advancedAnalyticsRoutes = require('./routes/advancedAnalyticsRoutes');
-//   app.use('/api/advanced-analytics', advancedAnalyticsRoutes);
-//   console.log('✓ Advanced Analytics routes loaded');
-// } catch (error) {
-//   console.error('Error loading advancedAnalyticsRoutes:', error.message);
-// }
-
-try {
-  const userRoutes = require('./routes/userRoutes');
-  app.use('/api/user', userRoutes);
-  console.log('✓ User routes loaded');
-} catch (error) {
-  console.error('Error loading userRoutes:', error.message);
-}
-
-// Enhanced redirect route with analytics tracking
-app.get('/:shortId', async (req, res) => {
-  try {
-    const { shortId } = req.params;
-    const advancedAnalyticsController = require('./controllers/advancedAnalyticsController');
-    
-    // Use the advanced analytics tracking
-    req.params = { shortCode: shortId };
-    await advancedAnalyticsController.trackClick(req, res);
-    
-  } catch (error) {
-    console.error('Redirect error:', error);
-    
-    // Fallback to simple redirect
-    try {
-      const Url = require('./models/Url');
-      const url = await Url.findOne({ 
-        $or: [{ shortId }, { shortCode: shortId }] 
-      });
-      
-      if (!url) {
-        return res.status(404).send('URL not found');
-      }
-      
-      // Update click count
-      await Url.findOneAndUpdate(
-        { $or: [{ shortId }, { shortCode: shortId }] },
-        { 
-          $inc: { clicks: 1 },
-          $set: { lastAccessed: new Date() }
-        }
-      );
-      
-      res.redirect(url.originalUrl);
-    } catch (fallbackError) {
-      console.error('Fallback redirect error:', fallbackError);
-      res.status(500).send('Server error');
-    }
-  }
-});
-
-// Error handlers
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ message: 'API route not found' });
-});
-
-app.use((err, req, res, next) => {
-  console.error('Global error:', err);
-  res.status(500).json({ message: 'Internal server error' });
-});
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✓ Server running on port ${PORT}`);
-});
+// Start the server
+startServer();

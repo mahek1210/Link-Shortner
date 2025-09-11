@@ -6,8 +6,7 @@ const apiKeySchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
-    index: true
+    required: true
   },
   name: {
     type: String,
@@ -75,8 +74,7 @@ const apiKeySchema = new mongoose.Schema({
     default: true
   },
   expiresAt: {
-    type: Date,
-    index: { expireAfterSeconds: 0 } // TTL index for automatic cleanup
+    type: Date
   },
   allowedDomains: [{
     type: String,

@@ -190,12 +190,10 @@ const handleRedirect = async (req, res) => {
     const { shortCode } = req.params;
     const { password } = req.query;
     
-    console.log('Redirect request for shortCode:', shortCode);
-    
     // Find URL by shortCode or customAlias
     const urlDoc = await Url.findOne({ 
       $or: [{ shortCode }, { customAlias: shortCode }] 
-    }).select('+password'); // Include password field
+    }).select('+password');
     
     if (!urlDoc) {
       return res.status(404).json({ error: 'URL not found' });
@@ -221,37 +219,13 @@ const handleRedirect = async (req, res) => {
       }
     }
     
-    // Get client information for analytics
+    // Get client information for analytics (fast)
     const clientIP = getClientIP(req);
     const userAgent = req.get('User-Agent') || 'Unknown';
     const referrer = getReferrer(req);
-    const parsedUA = parseUserAgent(userAgent);
-    const geoData = getGeolocation(clientIP);
     
-    // Create analytics record
-    const analyticsData = {
-      urlId: urlDoc._id,
-      shortCode: urlDoc.shortCode,
-      clickData: {
-        ip: clientIP,
-        userAgent: userAgent,
-        referrer: referrer,
-        country: geoData.country,
-        city: geoData.city,
-        device: parsedUA.device,
-        browser: parsedUA.browser,
-        os: parsedUA.os,
-        isBot: parsedUA.isBot
-      }
-    };
-    
-    // Save analytics data (async, don't wait)
-    Analytics.create(analyticsData).catch(err => {
-      console.error('Error saving analytics:', err);
-    });
-    
-    // Update click count and last clicked time
-    await Url.updateOne(
+    // Update click count immediately (fast operation)
+    const updatePromise = Url.updateOne(
       { _id: urlDoc._id },
       { 
         $inc: { clicks: 1 },
@@ -259,10 +233,38 @@ const handleRedirect = async (req, res) => {
       }
     );
     
-    console.log('Redirecting to:', urlDoc.originalUrl);
-    console.log('Analytics data saved:', analyticsData);
+    // Save analytics data asynchronously (don't wait)
+    setImmediate(async () => {
+      try {
+        const parsedUA = parseUserAgent(userAgent);
+        const geoData = getGeolocation(clientIP);
+        
+        const analyticsData = {
+          urlId: urlDoc._id,
+          shortCode: urlDoc.shortCode,
+          clickData: {
+            ip: clientIP,
+            userAgent: userAgent,
+            referrer: referrer,
+            country: geoData.country,
+            city: geoData.city,
+            device: parsedUA.device,
+            browser: parsedUA.browser,
+            os: parsedUA.os,
+            isBot: parsedUA.isBot,
+            timestamp: new Date()
+          }
+        };
+        
+        await Analytics.create(analyticsData);
+        await updatePromise;
+      } catch (err) {
+        console.error('Error saving analytics:', err);
+      }
+    });
     
-    res.redirect(urlDoc.originalUrl);
+    // Redirect immediately without waiting for analytics
+    res.redirect(301, urlDoc.originalUrl);
     
   } catch (error) {
     console.error('Error handling redirect:', error);

@@ -6,6 +6,7 @@
  * 4. Better security practices (no password in responses)
  * 5. Added proper HTTP status codes
  * 6. Enhanced token generation with more secure options
+ * 7. Fixed authentication issues: added name field handling, improved error responses, and optimized performance
  */
 
 // src/controllers/authController.js
@@ -33,41 +34,61 @@ const generateToken = (userId) => {
 // POST /api/auth/signup
 async function signup(req, res) {
   try {
-    const { username, email, password } = req.body;
+    console.log('Signup attempt:', { email: req.body.email, name: req.body.name });
+    
+    const { username, email, password, name } = req.body;
 
     // Input validation
     if (!username || !email || !password) {
       return res.status(400).json({ 
-        error: 'All fields are required',
-        details: { username: !!username, email: !!email, password: !!password }
+        success: false,
+        message: 'All fields are required',
+        errors: [
+          { field: 'username', message: !username ? 'Username is required' : null },
+          { field: 'email', message: !email ? 'Email is required' : null },
+          { field: 'password', message: !password ? 'Password is required' : null }
+        ].filter(e => e.message)
       });
     }
 
     // Enhanced validation
     if (username.length < 3 || username.length > 30) {
-      return res.status(400).json({ error: 'Username must be between 3 and 30 characters' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Username must be between 3 and 30 characters' 
+      });
     }
 
     if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Password must be at least 6 characters' 
+      });
     }
 
     // Email format validation
-    const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Please enter a valid email address' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Please enter a valid email address' 
+      });
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email: email.toLowerCase() }, { username }]
+    const existingUser = await User.findOne({ 
+      $or: [ 
+        { email: email.toLowerCase() }, 
+        { username: username.trim() } 
+      ] 
     });
 
     if (existingUser) {
-      const field = existingUser.email === email.toLowerCase() ? 'email' : 'username';
       return res.status(409).json({ 
-        error: `User with this ${field} already exists`,
-        field 
+        success: false,
+        message: existingUser.email === email.toLowerCase() 
+          ? 'User already exists with this email'
+          : 'Username is already taken'
       });
     }
 
@@ -75,7 +96,10 @@ async function signup(req, res) {
     const user = new User({
       username: username.trim(),
       email: email.toLowerCase().trim(),
-      password
+      password,
+      name: name ? name.trim() : username.trim(), // Use name if provided, fallback to username
+      role: 'user',
+      isActive: true
     });
 
     await user.save();
@@ -88,16 +112,20 @@ async function signup(req, res) {
     await user.save();
 
     res.status(201).json({
+      success: true,
       message: 'User created successfully',
       token,
       user: {
         id: user._id,
         username: user.username,
         email: user.email,
+        name: user.name,
         role: user.role,
         createdAt: user.createdAt
       }
     });
+
+    console.log('User created successfully:', user.email);
   } catch (error) {
     console.error('Signup error:', error);
     
@@ -105,60 +133,84 @@ async function signup(req, res) {
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({ 
-        error: 'Validation failed', 
-        details: errors 
+        success: false,
+        message: 'Validation failed', 
+        errors: errors 
       });
     }
 
     // Handle duplicate key errors
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
+      const message = field === 'email' 
+        ? 'User already exists with this email'
+        : field === 'username'
+        ? 'Username is already taken'
+        : 'User already exists';
+      
       return res.status(409).json({ 
-        error: `User with this ${field} already exists`,
-        field 
+        success: false,
+        message
       });
     }
 
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Internal server error during signup' 
+    });
   }
 }
 
 // POST /api/auth/login
 async function login(req, res) {
   try {
+    console.log('Login attempt:', { email: req.body.email });
+    
     const { email, password } = req.body;
 
     // Input validation
     if (!email || !password) {
       return res.status(400).json({ 
-        error: 'Email and password are required',
-        details: { email: !!email, password: !!password }
+        success: false,
+        message: 'Email and password are required'
       });
     }
 
     // Email format validation
-    const emailRegex = /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Please enter a valid email address' });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Please enter a valid email address' 
+      });
     }
 
     // Find user (include password for comparison)
     const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+password');
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ 
+        success: false,
+        message: 'Invalid email or password' 
+      });
     }
 
     // Check if user is active
     if (!user.isActive) {
-      return res.status(401).json({ error: 'Account is deactivated. Please contact support.' });
+      return res.status(401).json({ 
+        success: false,
+        message: 'Account is deactivated. Please contact support.' 
+      });
     }
 
     // Check password
     const isPasswordValid = await user.comparePassword(password);
 
     if (!isPasswordValid) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ 
+        success: false,
+        message: 'Invalid email or password' 
+      });
     }
 
     // Generate token
@@ -169,19 +221,26 @@ async function login(req, res) {
     await user.save();
 
     res.json({
+      success: true,
       message: 'Login successful',
       token,
       user: {
         id: user._id,
         username: user.username,
         email: user.email,
+        name: user.name,
         role: user.role,
         lastLogin: user.lastLogin
       }
     });
+
+    console.log('Login successful:', user.email);
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      message: 'Internal server error during login' 
+    });
   }
 }
 
@@ -193,6 +252,7 @@ async function getProfile(req, res) {
         id: req.user._id,
         username: req.user.username,
         email: req.user.email,
+        name: req.user.name,
         role: req.user.role,
         isActive: req.user.isActive,
         createdAt: req.user.createdAt,
@@ -223,24 +283,39 @@ async function googleCallback(req, res) {
     const user = req.user;
     
     if (!user) {
-      return res.status(401).json({ 
-        error: 'Google authentication failed',
-        message: 'Unable to authenticate with Google'
-      });
+      console.error('Google OAuth callback: No user found');
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const errorUrl = `${frontendUrl}/auth-error?error=${encodeURIComponent('Authentication failed')}`;
+      return res.redirect(errorUrl);
     }
     
     // Generate JWT token
     const token = generateToken(user._id);
     
-    // Redirect to frontend with token
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
+    
+    console.log('Google OAuth successful for user:', user.email);
+    
+    // Redirect to frontend with token and user data
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const redirectUrl = `${frontendUrl}/auth-success?token=${encodeURIComponent(token)}`;
+    const userData = {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      name: user.name,
+      avatar: user.avatar,
+      provider: 'google'
+    };
+    
+    const redirectUrl = `${frontendUrl}/auth-success?token=${encodeURIComponent(token)}&user=${encodeURIComponent(JSON.stringify(userData))}`;
     
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('Google callback error:', error);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const errorUrl = `${frontendUrl}/auth-error?error=${encodeURIComponent('Authentication failed')}`;
+    const errorUrl = `${frontendUrl}/auth-error?error=${encodeURIComponent('Authentication failed: ' + error.message)}`;
     res.redirect(errorUrl);
   }
 }

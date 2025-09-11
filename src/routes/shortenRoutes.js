@@ -94,6 +94,7 @@ router.post('/', auth, async (req, res) => {
       data: {
         id: url._id,
         originalUrl: url.originalUrl,
+        shortCode: url.shortId, // Map shortId to shortCode for consistency
         shortId: url.shortId,
         shortUrl: `${baseUrl}/${url.shortId}`,
         clicks: url.clicks,

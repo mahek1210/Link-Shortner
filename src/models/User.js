@@ -14,9 +14,8 @@ const UserSchema = new mongoose.Schema({
   // Traditional auth fields
   username: { 
     type: String, 
-    required: function() { return !this.googleId; }, // Required only if not Google user
+    required: [true, 'Username is required'], // Always required, auto-generated for Google users
     unique: true,
-    sparse: true, // Allows null values for uniqueness
     trim: true,
     minlength: [3, 'Username must be at least 3 characters'],
     maxlength: [30, 'Username cannot exceed 30 characters'],
@@ -75,6 +74,76 @@ const UserSchema = new mongoose.Schema({
   },
   lastLogin: { 
     type: Date 
+  },
+  
+  // GDPR Compliance fields
+  consent: {
+    analytics: {
+      type: Boolean,
+      default: false
+    },
+    marketing: {
+      type: Boolean,
+      default: false
+    },
+    functional: {
+      type: Boolean,
+      default: true // Required for basic functionality
+    },
+    consentDate: {
+      type: Date,
+      default: null
+    },
+    ipAddress: {
+      type: String, // Hashed IP for consent tracking
+      default: null
+    },
+    userAgent: {
+      type: String,
+      default: null
+    },
+    consentVersion: {
+      type: String,
+      default: '1.0'
+    }
+  },
+  
+  // Data protection fields
+  anonymized: {
+    type: Boolean,
+    default: false
+  },
+  anonymizedAt: {
+    type: Date,
+    default: null
+  },
+  
+  // Branding configuration
+  branding: {
+    enabled: {
+      type: Boolean,
+      default: false
+    },
+    logo: {
+      type: String,
+      default: null
+    },
+    primaryColor: {
+      type: String,
+      default: '#3B82F6'
+    },
+    secondaryColor: {
+      type: String,
+      default: '#1F2937'
+    },
+    customDomain: {
+      type: String,
+      default: null
+    },
+    customCSS: {
+      type: String,
+      default: null
+    }
   }
 }, {
   timestamps: true // Adds createdAt and updatedAt automatically

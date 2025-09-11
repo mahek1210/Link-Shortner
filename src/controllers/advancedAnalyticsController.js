@@ -103,141 +103,244 @@ const trackClick = async (req, res) => {
     const { shortCode } = req.params;
     const ip = req.ip || req.connection.remoteAddress || '127.0.0.1';
     const userAgent = req.get('User-Agent') || '';
-    const referrer = req.get('Referer') || '';
+    const url = await Url.findOne({ 
+      $or: [
+        { shortCode },
+        { customAlias: shortCode }
+      ],
+      isActive: true 
+    });
+
+    if (!url) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Short URL not found'
+      });
+    }
+
+    // Check if URL is expired
+    if (url.isExpired && url.isExpired()) {
+      return res.status(410).json({
+        status: 'fail',
+        message: 'Short URL has expired'
+      });
+    }
+
+    // Parse user agent for device detection
+    const parser = new UAParser(req.get('User-Agent'));
+    const uaResult = parser.getResult();
+
+    // Detect bot
+    const isBot = /bot|crawler|spider|crawling/i.test(req.get('User-Agent'));
     
-    // Parse UTM parameters
-    const utmParams = {
+    // Get or create session ID
+    const sessionId = req.sessionID || req.get('X-Session-ID') || 
+                     crypto.randomBytes(16).toString('hex');
+
+    // Get IP address with proper forwarding support
+    const clientIP = req.clientIP || req.ip || 
+                    req.connection.remoteAddress || 
+                    req.socket.remoteAddress ||
+                    (req.connection.socket ? req.connection.socket.remoteAddress : null) ||
+                    '127.0.0.1';
+
+    // Hash IP for privacy compliance
+    const hashedIp = crypto.createHash('sha256')
+      .update(clientIP + (process.env.IP_SALT || 'default-salt'))
+      .digest('hex');
+
+    // Get geographic data (you might want to use a proper GeoIP service)
+    const geoData = req.geoip || {
+      country: 'Unknown',
+      country_code: 'XX',
+      region: 'Unknown',
+      city: 'Unknown',
+      timezone: 'UTC'
+    };
+
+    // Determine if this is a unique visitor
+    const recentClicks = await Analytics.findOne({ 
+      shortCode,
+      'clicks.hashedIp': hashedIp,
+      'clicks.timestamp': { 
+        $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
+      }
+    });
+    
+    const isUniqueVisitor = !recentClicks;
+
+    // Create click data
+    const clickData = {
+      timestamp: new Date(),
+      ip: clientIP,
+      hashedIp,
+      userAgent: req.get('User-Agent') || '',
+      referrer: req.get('Referer') || req.get('Referrer') || null,
+      referrerCategory: categorizeReferrer(req.get('Referer') || req.get('Referrer')),
+      
+      // Geographic data
+      country: geoData.country || 'Unknown',
+      countryCode: geoData.country_code || 'XX',
+      region: geoData.region || 'Unknown',
+      city: geoData.city || 'Unknown',
+      timezone: geoData.timezone || 'UTC',
+      
+      // Device information
+      device: detectDeviceType(uaResult),
+      deviceBrand: uaResult.device.vendor || 'Unknown',
+      deviceModel: uaResult.device.model || 'Unknown',
+      
+      // Browser information
+      browser: uaResult.browser.name || 'Unknown',
+      browserVersion: uaResult.browser.version || 'Unknown',
+      
+      // Operating System
+      os: uaResult.os.name || 'Unknown',
+      osVersion: uaResult.os.version || 'Unknown',
+      
+      // Bot detection
+      isBot,
+      botType: isBot ? detectBotType(req.get('User-Agent')) : null,
+      
+      // Session tracking
+      sessionId,
+      isUniqueVisitor,
+      
+      // Performance
+      loadTime: Date.now() - (req.startTime || Date.now()),
+      
+      // UTM parameters
       utmSource: req.query.utm_source,
       utmMedium: req.query.utm_medium,
       utmCampaign: req.query.utm_campaign,
       utmTerm: req.query.utm_term,
       utmContent: req.query.utm_content
     };
-    
-    // Find the URL
-    const url = await Url.findOne({ 
-      $or: [{ shortId: shortCode }, { shortCode }] 
+
+    // Update URL click count and last accessed
+    await Url.findByIdAndUpdate(url._id, {
+      $inc: { clicks: 1 },
+      $set: { 
+        lastAccessed: new Date(),
+        lastClicked: new Date()
+      },
+      $push: {
+        clickHistory: {
+          $each: [{
+            timestamp: clickData.timestamp,
+            ip: clickData.ip,
+            userAgent: clickData.userAgent,
+            referrer: clickData.referrer,
+            device: clickData.device,
+            browser: clickData.browser,
+            os: clickData.os,
+            country: clickData.country,
+            city: clickData.city
+          }],
+          $slice: -1000 // Keep only last 1000 clicks
+        }
+      }
     });
-    
-    if (!url) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Short URL not found' 
-      });
-    }
-    
-    // Parse user agent
-    const parser = new UAParser(userAgent);
-    const browser = parser.getBrowser();
-    const os = parser.getOS();
-    const device = parser.getDevice();
-    
-    // Hash IP for privacy
-    const hashedIp = hashIP(ip);
-    
-    // Check if this is a unique visitor (within last 24 hours)
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Update or create analytics record
     let analytics = await Analytics.findOne({ shortCode });
     
-    let isUniqueVisitor = true;
-    if (analytics) {
-      const recentClick = analytics.clicks.find(click => 
-        click.hashedIp === hashedIp && 
-        click.timestamp > twentyFourHoursAgo
-      );
-      isUniqueVisitor = !recentClick;
-    }
-    
-    // Detect bot
-    const isBot = detectBot(userAgent);
-    const botType = isBot ? getBotType(userAgent) : null;
-    
-    // Create click data
-    const clickData = {
-      timestamp: new Date(),
-      ip,
-      hashedIp,
-      userAgent,
-      referrer,
-      referrerCategory: categorizeReferrer(referrer),
-      country: req.geoip?.country || 'Unknown',
-      countryCode: req.geoip?.country_code || 'XX',
-      region: req.geoip?.region || 'Unknown',
-      city: req.geoip?.city || 'Unknown',
-      timezone: req.geoip?.timezone || 'UTC',
-      coordinates: req.geoip ? {
-        lat: req.geoip.latitude,
-        lng: req.geoip.longitude
-      } : undefined,
-      device: detectDevice(userAgent),
-      deviceBrand: device.vendor || 'Unknown',
-      deviceModel: device.model || 'Unknown',
-      browser: browser.name || 'Unknown',
-      browserVersion: browser.version || 'Unknown',
-      os: os.name || 'Unknown',
-      osVersion: os.version || 'Unknown',
-      screenResolution: {
-        width: req.body?.screenWidth,
-        height: req.body?.screenHeight
-      },
-      ...utmParams,
-      isBot,
-      botType,
-      sessionId: req.sessionID || crypto.randomUUID(),
-      isUniqueVisitor,
-      loadTime: req.body?.loadTime
-    };
-    
-    // Create or update analytics
     if (!analytics) {
       analytics = new Analytics({
         urlId: url._id,
         shortCode,
-        clicks: [clickData],
+        clicks: [],
         stats: {
-          totalClicks: 1,
-          uniqueVisitors: isUniqueVisitor ? 1 : 0,
-          dailyStats: [{
-            date: new Date().setHours(0, 0, 0, 0),
-            clicks: 1,
-            uniqueVisitors: isUniqueVisitor ? 1 : 0
-          }],
+          totalClicks: 0,
+          uniqueVisitors: 0,
+          dailyStats: [],
           topCountries: [],
+          topCities: [],
           deviceStats: [],
           browserStats: [],
+          osStats: [],
           referrerStats: [],
           hourlyPattern: Array(24).fill(0).map((_, i) => ({ hour: i, count: 0 })),
           weeklyPattern: Array(7).fill(0).map((_, i) => ({ day: i, count: 0 }))
         }
       });
-      
-      // Set initial patterns
-      const hour = new Date().getHours();
-      const day = new Date().getDay();
-      analytics.stats.hourlyPattern[hour].count = 1;
-      analytics.stats.weeklyPattern[day].count = 1;
-      
-      await analytics.save();
-    } else {
-      await analytics.addClick(clickData);
     }
-    
-    // Update URL click count
-    url.clicks = (url.clicks || 0) + 1;
-    url.lastClicked = new Date();
-    await url.save();
-    
+
+    // Add click to analytics
+    await analytics.addClick(clickData);
+
+    // Cache the URL for faster future access
+    await cacheService.set(`url:${shortCode}`, url, 3600); // Cache for 1 hour
+
+    // Log the click for audit purposes (only in production)
+    if (process.env.NODE_ENV === 'production') {
+      await auditService.logUserAction(
+        'url_click',
+        `Clicked short URL: ${shortCode}`,
+        null, // No user ID for anonymous clicks
+        {
+          shortCode,
+          originalUrl: url.originalUrl,
+          userAgent: clickData.userAgent,
+          referrer: clickData.referrer,
+          country: clickData.country,
+          device: clickData.device,
+          browser: clickData.browser,
+          isBot: clickData.isBot,
+          isUniqueVisitor: clickData.isUniqueVisitor
+        },
+        {
+          category: 'analytics',
+          severity: 'low',
+          ipAddress: clientIP,
+          userAgent: clickData.userAgent
+        }
+      );
+    }
+
+    logger.info('Click tracked successfully', {
+      shortCode,
+      originalUrl: url.originalUrl,
+      country: clickData.country,
+      device: clickData.device,
+      browser: clickData.browser,
+      isUniqueVisitor: clickData.isUniqueVisitor,
+      loadTime: clickData.loadTime
+    });
+
     // Redirect to original URL
-    res.redirect(url.originalUrl);
-    
+    res.redirect(301, url.originalUrl);
+
   } catch (error) {
-    console.error('Error tracking click:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error tracking click' 
+    logger.error('Click tracking error:', {
+      error: error.message,
+      stack: error.stack,
+      shortCode: req.params.shortCode
+    });
+
+    // Even if analytics fails, still try to redirect
+    try {
+      const url = await Url.findOne({ 
+        $or: [
+          { shortCode: req.params.shortCode },
+          { customAlias: req.params.shortCode }
+        ],
+        isActive: true 
+      });
+      
+      if (url) {
+        return res.redirect(301, url.originalUrl);
+      }
+    } catch (fallbackError) {
+      logger.error('Fallback redirect failed:', fallbackError);
+    }
+
+    res.status(500).json({
+      status: 'error',
+      message: 'Click tracking failed'
     });
   }
-};
+}
 
 // Get comprehensive analytics for a URL
 const getAnalytics = async (req, res) => {

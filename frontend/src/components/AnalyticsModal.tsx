@@ -72,7 +72,13 @@ const AnalyticsModal: React.FC<AnalyticsModalProps> = ({ url, onClose }) => {
       setError(null);
       
       const analyticsData = await urlAPI.getAnalytics(url.shortId);
-      setAnalytics(analyticsData as AnalyticsData);
+      console.log('Analytics data received:', analyticsData);
+      
+      if (analyticsData.success && analyticsData.data) {
+        setAnalytics(analyticsData.data as AnalyticsData);
+      } else {
+        throw new Error(analyticsData.message || 'No analytics data available');
+      }
     } catch (err: unknown) {
       console.error('Analytics fetch error:', err);
       

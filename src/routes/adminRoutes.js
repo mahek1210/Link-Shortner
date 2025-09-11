@@ -7,7 +7,7 @@ const {
   updateUserStatus, 
   getAdminStats 
 } = require('../controllers/adminController');
-const { adminAuth } = require('../middleware/auth');
+const { auth, adminAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
